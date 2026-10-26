@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           cli="$(find bin -type f -name effectcraft-cli -print -quit)"
           "$cli" exec file.import '{"paths":["native/filmcraft.mp4"]}' --empty --save-as native/effectcraft.ecproj | tee native/effectcraft-import.json
-          "$cli" exec file.newCompFromSelection '{}' native/effectcraft.ecproj --save | tee native/effectcraft-comp.json
+          "$cli" run native/effectcraft.ecproj project.select '{"items":[1]}' file.newCompFromSelection '{}' --save | tee native/effectcraft-comp.json
           "$cli" exec effect.apply '{"layer":"#1","effect":"Gaussian Blur"}' native/effectcraft.ecproj --save | tee native/effectcraft-effect.json
           timeout 240s "$cli" render native/effectcraft.ecproj --out native/effectcraft.mp4 --format h264 --end 2 > native/effectcraft-export.log 2>&1 || { cat native/effectcraft-export.log; exit 1; }
           cat native/effectcraft-export.log
