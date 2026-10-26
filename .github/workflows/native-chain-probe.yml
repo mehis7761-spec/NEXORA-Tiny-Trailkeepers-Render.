@@ -42,7 +42,7 @@ jobs:
           cli="$(find bin -type f -name filmcraft-cli -print -quit)"
           "$cli" describe timeline.place > native/filmcraft-place-description.json
           cat native/filmcraft-place-description.json
-          "$cli" --demo --save-as native/filmcraft.fcproj import native/input.mp4 | tee native/filmcraft-import.json
+          "$cli" --demo --save-as native/filmcraft.fcproj import "$(realpath native/input.mp4)" | tee native/filmcraft-import.json
           python3 - <<'PY' > native/item-id.txt
           import json
           x=json.load(open('native/filmcraft-import.json'))
@@ -69,7 +69,9 @@ jobs:
         run: |
           set -euo pipefail
           cli="$(find bin -type f -name effectcraft-cli -print -quit)"
-          "$cli" exec file.import '{"paths":["native/filmcraft.mp4"]}' --empty --save-as native/effectcraft.ecproj | tee native/effectcraft-import.json
+          media_path="$(realpath native/filmcraft.mp4)"
+          "$cli" exec file.import "{\"paths\":[\"$media_path\"]}" --empty --save-as native/effectcraft.ecproj | tee native/effectcraft-import.json
+          "$cli" exec footage.check '{"wait":true}' native/effectcraft.ecproj | tee native/effectcraft-footage-check.json
           "$cli" run native/effectcraft.ecproj project.select '{"items":[1]}' file.newCompFromSelection '{}' --save | tee native/effectcraft-comp.json
           cp native/effectcraft.ecproj native/effectcraft-unmodified.ecproj
           "$cli" exec effect.apply '{"layer":"#1","effect":"Gaussian Blur"}' native/effectcraft.ecproj --save | tee native/effectcraft-effect.json
