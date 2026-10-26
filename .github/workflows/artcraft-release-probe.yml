@@ -65,6 +65,10 @@ jobs:
           if [ "$count" -eq 0 ]; then
             echo "NO_CLI_FOUND: inspect package layout or install.sh; no import/export attempted"
           fi
+      - name: Install free FFmpeg for media probe and decode checks
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
       - name: Native CLI mini smoke (demo only, not original 12s)
         shell: bash
         run: |
