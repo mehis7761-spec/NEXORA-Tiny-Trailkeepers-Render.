@@ -1,0 +1,107 @@
+name: NEXORA native FilmCraft to EffectCraft chain (synthetic)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/native-chain-probe.yml'
+permissions:
+  contents: read
+jobs:
+  native-chain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install free FFmpeg and fetch pinned ArtCraft releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo timeout 120s apt-get -o Acquire::Retries=1 install -y -qq ffmpeg
+          fi
+          mkdir -p native bin
+          for spec in 'filmcraft 0.13.0 40e9d685fb3ed1b0a21c9c02211f1a8499e09a47c551244ce7ee80f2584d3a9b' 'effectcraft 0.17.0 cd7ace0d74734b79e851f18537c14b2953b7feb5da240f5005e6805476a15292'; do
+            read -r app version checksum <<< "$spec"
+            archive="${app}-${version}-linux-x86_64.tar.gz"
+            curl --fail --location --retry 2 --connect-timeout 15 --max-time 240 "https://github.com/storytold/${app}/releases/download/v${version}/${archive}" -o "$archive"
+            echo "$checksum  $archive" | sha256sum -c -
+            tar -xzf "$archive" -C bin
+          done
+          find bin -type f -name '*craft-cli' -exec chmod u+x {} \;
+          find bin -type f -name '*craft-cli' -print
+          command -v ffprobe
+      - name: Create synthetic 2s video and audio (NOT original source)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=16:duration=2" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest native/input.mp4
+          ffprobe -v error -show_entries format=duration -show_entries stream=codec_type,width,height -of json native/input.mp4
+      - name: FilmCraft import, timeline placement and export
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli="$(find bin -type f -name filmcraft-cli -print -quit)"
+          "$cli" describe timeline.place > native/filmcraft-place-description.json
+          cat native/filmcraft-place-description.json
+          "$cli" --demo --save-as native/filmcraft.fcproj import native/input.mp4 | tee native/filmcraft-import.json
+          python3 - <<'PY' > native/item-id.txt
+          import json
+          x=json.load(open('native/filmcraft-import.json'))
+          assert x.get('errors')==[],x
+          assert len(x.get('items',[]))==1,x
+          print(x['items'][0])
+          PY
+          item="$(cat native/item-id.txt)"
+          "$cli" --project native/filmcraft.fcproj --save exec timeline.place "{\"item\":$item,\"time\":0,\"track\":\"V1\",\"audioTrack\":\"A1\"}" | tee native/filmcraft-place.json
+          "$cli" --project native/filmcraft.fcproj inspect sequence > native/filmcraft-sequence.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('native/filmcraft-sequence.json'))
+          print(json.dumps(x,indent=2)[:7000])
+          assert str(json.load(open('native/filmcraft-import.json'))['items'][0]) in json.dumps(x), 'Imported clip not found on exported timeline'
+          PY
+          timeout 240s "$cli" --project native/filmcraft.fcproj export native/filmcraft.mp4 --format h264 --start 0 --end 2 > native/filmcraft-export.log 2>&1 || { cat native/filmcraft-export.log; exit 1; }
+          cat native/filmcraft-export.log
+          test -s native/filmcraft.mp4
+          ffmpeg -v error -i native/filmcraft.mp4 -f null -
+          ffprobe -v error -show_entries format=duration -show_entries stream=codec_type,width,height -of json native/filmcraft.mp4
+      - name: EffectCraft import, native effect and export
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli="$(find bin -type f -name effectcraft-cli -print -quit)"
+          "$cli" exec file.import '{"paths":["native/filmcraft.mp4"]}' --empty --save-as native/effectcraft.ecproj | tee native/effectcraft-import.json
+          "$cli" exec file.newCompFromSelection '{}' native/effectcraft.ecproj --save | tee native/effectcraft-comp.json
+          "$cli" exec effect.apply '{"layer":"#1","effect":"Gaussian Blur"}' native/effectcraft.ecproj --save | tee native/effectcraft-effect.json
+          timeout 240s "$cli" render native/effectcraft.ecproj --out native/effectcraft.mp4 --format h264 --end 2 > native/effectcraft-export.log 2>&1 || { cat native/effectcraft-export.log; exit 1; }
+          cat native/effectcraft-export.log
+          test -s native/effectcraft.mp4
+          ffmpeg -v error -i native/effectcraft.mp4 -f null -
+          ffprobe -v error -show_entries format=duration -show_entries stream=codec_type,width,height -of json native/effectcraft.mp4
+      - name: Strict output QA (must retain audio)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess,json,os
+          for name in ('filmcraft','effectcraft'):
+              path=f'native/{name}.mp4'
+              d=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-show_entries','stream=codec_type,width,height','-of','json',path]))
+              print(name,d)
+              assert 1.7<float(d['format']['duration'])<2.3, 'Wrong duration'
+              assert any(s.get('codec_type')=='video' for s in d['streams']), 'Missing video'
+              assert any(s.get('codec_type')=='audio' for s in d['streams']), 'Missing audio'
+          print('NATIVE_SYNTHETIC_CHAIN_PASS (NOT original 12s)')
+          PY
+          sha256sum native/input.mp4 native/filmcraft.mp4 native/effectcraft.mp4
+      - name: Retain diagnostic logs (no paid services)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-chain-diagnostics
+          path: |
+            native/*.json
+            native/*.txt
+            native/*.log
+            native/*.fcproj
+            native/*.ecproj
+          retention-days: 1
