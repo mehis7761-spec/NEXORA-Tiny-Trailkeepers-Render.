@@ -74,6 +74,7 @@ jobs:
           cp native/effectcraft.ecproj native/effectcraft-unmodified.ecproj
           "$cli" exec effect.apply '{"layer":"#1","effect":"Gaussian Blur"}' native/effectcraft.ecproj --save | tee native/effectcraft-effect.json
           "$cli" exec prop.set '{"layer":"#1","path":"effects/#1/blurriness","value":20}' native/effectcraft.ecproj --save | tee native/effectcraft-effect-settings.json
+          "$cli" exec effect.apply '{"layer":"#1","effect":"Invert"}' native/effectcraft.ecproj --save | tee native/effectcraft-invert.json
           timeout 240s "$cli" render native/effectcraft-unmodified.ecproj --out native/effectcraft-unmodified.mp4 --format h264 --end 2 > native/effectcraft-unmodified-export.log 2>&1
           timeout 240s "$cli" render native/effectcraft.ecproj --out native/effectcraft.mp4 --format h264 --end 2 > native/effectcraft-export.log 2>&1 || { cat native/effectcraft-export.log; exit 1; }
           cat native/effectcraft-export.log
@@ -98,6 +99,9 @@ jobs:
           plain=frame('native/effectcraft-unmodified.mp4')
           changed=frame('native/effectcraft.mp4')
           assert len(plain)==len(changed)==160*90*3
+          for name in ('native/input.mp4','native/filmcraft.mp4','native/effectcraft-unmodified.mp4','native/effectcraft.mp4'):
+              p=frame(name)
+              print('frame_stats',name,'mean',sum(p)/len(p),'min',min(p),'max',max(p),'unique',len(set(p)))
           mad=sum(abs(a-b) for a,b in zip(plain,changed))/len(plain)
           print('native_effect_mean_absolute_pixel_difference',mad)
           assert mad>0.4, 'Effect did not produce a measurable visual difference'
