@@ -1,0 +1,6 @@
+{
+  "name": "nexora-control-health",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}
