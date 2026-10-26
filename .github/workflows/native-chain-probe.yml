@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/native-chain-probe.yml'
+      - 'assets/original_12s.mp4'
 permissions:
   contents: read
 jobs:
@@ -11,6 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
       - name: Install free FFmpeg and fetch pinned ArtCraft releases
         shell: bash
         run: |
@@ -33,7 +35,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=16:duration=2" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest native/input.mp4
+          if [ -f assets/original_12s.mp4 ]; then
+            echo "754b74c4c8e0fc16c4a7b0abade25f4eda7bfadf08e28b3bb6035e69e29eabab  assets/original_12s.mp4" | sha256sum -c -
+            cp assets/original_12s.mp4 native/input.mp4
+            echo "END_SECONDS=12" >> "$GITHUB_ENV"
+            echo "INPUT_KIND=original" >> "$GITHUB_ENV"
+            echo "ORIGINAL_INPUT_VERIFIED: 12s source SHA256"
+          else
+            ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=16:duration=2" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest native/input.mp4
+            echo "END_SECONDS=2" >> "$GITHUB_ENV"
+            echo "INPUT_KIND=synthetic" >> "$GITHUB_ENV"
+            echo "NO_ORIGINAL_INPUT: synthetic-only test, full acceptance gate CLOSED"
+          fi
+          ffmpeg -v error -i native/input.mp4 -f null -
           ffprobe -v error -show_entries format=duration -show_entries stream=codec_type,width,height -of json native/input.mp4
       - name: FilmCraft import, timeline placement and export
         shell: bash
@@ -59,7 +73,7 @@ jobs:
           print(json.dumps(x,indent=2)[:7000])
           assert str(json.load(open('native/filmcraft-import.json'))['items'][0]) in json.dumps(x), 'Imported clip not found on exported timeline'
           PY
-          timeout 240s "$cli" --project native/filmcraft.fcproj export native/filmcraft.mp4 --format h264 --start 0 --end 2 > native/filmcraft-export.log 2>&1 || { cat native/filmcraft-export.log; exit 1; }
+          timeout 240s "$cli" --project native/filmcraft.fcproj export native/filmcraft.mp4 --format h264 --start 0 --end "$END_SECONDS" > native/filmcraft-export.log 2>&1 || { cat native/filmcraft-export.log; exit 1; }
           cat native/filmcraft-export.log
           test -s native/filmcraft.mp4
           ffmpeg -v error -i native/filmcraft.mp4 -f null -
@@ -77,8 +91,8 @@ jobs:
           "$cli" exec effect.apply '{"layer":"#1","effect":"Gaussian Blur"}' native/effectcraft.ecproj --save | tee native/effectcraft-effect.json
           "$cli" exec prop.set '{"layer":"#1","path":"effects/#1/blurriness","value":20}' native/effectcraft.ecproj --save | tee native/effectcraft-effect-settings.json
           "$cli" exec effect.apply '{"layer":"#1","effect":"Invert"}' native/effectcraft.ecproj --save | tee native/effectcraft-invert.json
-          timeout 240s "$cli" render native/effectcraft-unmodified.ecproj --out native/effectcraft-unmodified.mp4 --format h264 --end 2 > native/effectcraft-unmodified-export.log 2>&1
-          timeout 240s "$cli" render native/effectcraft.ecproj --out native/effectcraft.mp4 --format h264 --end 2 > native/effectcraft-export.log 2>&1 || { cat native/effectcraft-export.log; exit 1; }
+          timeout 240s "$cli" render native/effectcraft-unmodified.ecproj --out native/effectcraft-unmodified.mp4 --format h264 --end "$END_SECONDS" > native/effectcraft-unmodified-export.log 2>&1
+          timeout 240s "$cli" render native/effectcraft.ecproj --out native/effectcraft.mp4 --format h264 --end "$END_SECONDS" > native/effectcraft-export.log 2>&1 || { cat native/effectcraft-export.log; exit 1; }
           cat native/effectcraft-export.log
           test -s native/effectcraft.mp4
           ffmpeg -v error -i native/effectcraft.mp4 -f null -
@@ -89,11 +103,12 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import subprocess,json,os
+          expected=float(os.environ['END_SECONDS'])
           for name in ('filmcraft','effectcraft'):
               path=f'native/{name}.mp4'
               d=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-show_entries','stream=codec_type,width,height','-of','json',path]))
               print(name,d)
-              assert 1.7<float(d['format']['duration'])<2.3, 'Wrong duration'
+              assert abs(float(d['format']['duration'])-expected)<0.25, 'Wrong duration'
               assert any(s.get('codec_type')=='video' for s in d['streams']), 'Missing video'
               assert any(s.get('codec_type')=='audio' for s in d['streams']), 'Missing audio'
           def frame(path):
@@ -107,7 +122,15 @@ jobs:
           mad=sum(abs(a-b) for a,b in zip(plain,changed))/len(plain)
           print('native_effect_mean_absolute_pixel_difference',mad)
           assert mad>0.4, 'Effect did not produce a measurable visual difference'
-          print('NATIVE_SYNTHETIC_CHAIN_PASS_WITH_VISUAL_DIFF (NOT original 12s)')
+          if os.environ['INPUT_KIND']=='original':
+              src=frame('native/input.mp4')
+              filmed=frame('native/filmcraft.mp4')
+              diff=sum(abs(a-b) for a,b in zip(src,filmed))/len(src)
+              print('original_vs_filmcraft_frame_difference',diff)
+              assert diff<65, 'FilmCraft source visual mismatch'
+              print('NATIVE_ORIGINAL_12S_CHAIN_PASS_WITH_VISUAL_DIFF')
+          else:
+              print('NATIVE_SYNTHETIC_CHAIN_PASS_WITH_VISUAL_DIFF (NOT original 12s)')
           PY
           sha256sum native/input.mp4 native/filmcraft.mp4 native/effectcraft.mp4
       - name: Retain diagnostic logs (no paid services)
