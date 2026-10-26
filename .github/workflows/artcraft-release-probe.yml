@@ -1,0 +1,73 @@
+name: NEXORA ArtCraft Linux pinned release probe
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/artcraft-release-probe.yml'
+permissions:
+  contents: read
+jobs:
+  release-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: filmcraft
+            version: 0.13.0
+            expected_sha256: 40e9d685fb3ed1b0a21c9c02211f1a8499e09a47c551244ce7ee80f2584d3a9b
+          - app: effectcraft
+            version: 0.17.0
+            expected_sha256: cd7ace0d74734b79e851f18537c14b2953b7feb5da240f5005e6805476a15292
+    steps:
+      - name: Inspect runner
+        run: |
+          uname -a
+          cat /etc/os-release | head -5
+          df -h .
+          command -v curl sha256sum tar timeout file
+      - name: Download and verify pinned official release
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="${{ matrix.app }}"
+          ver="${{ matrix.version }}"
+          archive="${app}-${ver}-linux-x86_64.tar.gz"
+          url="https://github.com/storytold/${app}/releases/download/v${ver}/${archive}"
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 240 "$url" --output "$archive"
+          echo "${{ matrix.expected_sha256 }}  ${archive}" | sha256sum --check --status
+          echo "SHA256 PASS: $archive"
+          mkdir -p unpack
+          tar -tzf "$archive" | head -40 || true
+          tar -xzf "$archive" -C unpack
+          echo "Executable candidates:"
+          find unpack -maxdepth 5 -type f \( -name '*craft*' -o -name '*cli*' \) | head -70
+      - name: Probe installed executable and CLI
+        shell: bash
+        run: |
+          set -uo pipefail
+          app="${{ matrix.app }}"
+          count=0
+          while IFS= read -r -d '' executable; do
+            count=$((count+1))
+            chmod u+x "$executable"
+            echo "=== $executable ==="
+            file "$executable"
+            timeout 15s "$executable" --help > /tmp/craft-help.log 2>&1
+            rc=$?
+            echo "exit_code=$rc"
+            head -c 3500 /tmp/craft-help.log || true
+            echo
+          done < <(find unpack -type f \( -name "${app}-cli" -o -name "${app}" \) -print0)
+          echo "candidate_count=$count"
+          if [ "$count" -eq 0 ]; then
+            echo "NO_CLI_FOUND: inspect package layout or install.sh; no import/export attempted"
+          fi
+      - name: Report exact verification gate
+        if: always()
+        run: |
+          echo "ArtCraft integration gate remains CLOSED."
+          echo "This job only checks official binary download, SHA-256, and --help."
+          echo "No 12-second original source imported; no editor-native effect or MP4 export verified."
+          echo "No paid runners, caches, or artifacts used."
