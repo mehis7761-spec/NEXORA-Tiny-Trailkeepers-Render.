@@ -68,10 +68,21 @@ jobs:
       - name: Install free FFmpeg for media probe and decode checks
         run: |
           set -euo pipefail
-          sudo timeout 150s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update -qq
-          sudo timeout 150s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y -qq ffmpeg
+          # The Ubuntu runner already has package indexes. A full apt update
+          # timed out (exit 124) on the FilmCraft matrix job on 2026-10-26.
+          # Prefer the runner's preinstalled FFmpeg, then cached indexes.
+          if command -v ffmpeg && command -v ffprobe; then
+            echo "FFmpeg already installed; no network/package operation"
+          elif sudo timeout 120s apt-get -o DPkg::Lock::Timeout=20 -o Acquire::Retries=1 install -y -qq ffmpeg; then
+            echo "FFmpeg installed from available package indexes"
+          else
+            echo "Direct install failed; refresh indexes with bounded timeouts"
+            sudo timeout 100s apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update -qq
+            sudo timeout 120s apt-get -o DPkg::Lock::Timeout=20 -o Acquire::Retries=1 install -y -qq ffmpeg
+          fi
           command -v ffmpeg
           command -v ffprobe
+          ffmpeg -version | sed -n '1p'
       - name: Native CLI mini smoke (demo only, not original 12s)
         shell: bash
         run: |
