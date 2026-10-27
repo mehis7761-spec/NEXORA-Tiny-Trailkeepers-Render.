@@ -74,7 +74,9 @@ jobs:
           print(x['items'][0])
           PY
           item="$(cat native/item-id.txt)"
-          "$cli" --project native/filmcraft.fcproj --save exec timeline.place "{\"item\":$item,\"time\":0,\"track\":\"V1\",\"audioTrack\":\"A1\"}" | tee native/filmcraft-place.json
+          # file.newSequence(fromItem) creates a clean sequence AND places the clip
+          # on V1/A1, per upstream engine commands.rs. No second placement needed.
+          "$cli" --project native/filmcraft.fcproj --save exec file.newSequence "{\"fromItem\":$item,\"name\":\"Tiny Trailkeepers Native Test\"}" | tee native/filmcraft-place.json
           "$cli" --project native/filmcraft.fcproj exec media.status '{}' > native/filmcraft-media-status.json 2>&1 || echo "MEDIA_STATUS_DIAGNOSTIC_FAILED (inspect artifact)"
           "$cli" --project native/filmcraft.fcproj inspect sequence > native/filmcraft-sequence.json
           python3 - <<'PY'
