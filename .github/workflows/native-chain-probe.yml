@@ -206,6 +206,22 @@ jobs:
               out_rms=rms(p)
               print('output_audio_rms',p,out_rms)
               assert out_rms>max(0.0001,source_rms*0.02), 'Exported audio is silent'
+          # A non-silent total RMS can conceal a missing or silent ending.
+          # Compare source and both native exports over separate time windows.
+          segments=[(0,1),(1,1)] if expected<3 else [(0,4),(4,4),(8,4)]
+          def segment_rms(path,start,length):
+              raw=subprocess.check_output(['ffmpeg','-nostdin','-v','error','-ss',str(start),'-t',str(length),'-i',path,'-vn','-ac','1','-ar','8000','-f','f32le','pipe:1'])
+              n=len(raw)//4
+              assert n>length*7000, f'Missing audio samples: {path} at {start}s ({n})'
+              return math.sqrt(sum(v[0]*v[0] for v in struct.iter_unpack('<f',raw[:n*4]))/n)
+          for start,length in segments:
+              reference=segment_rms('native/input.mp4',start,length)
+              assert reference>0.0001, f'Source audio silent in {start}-{start+length}s'
+              for name in ('filmcraft','effectcraft'):
+                  measured=segment_rms(f'native/{name}.mp4',start,length)
+                  print('audio_segment_qa',name,start,length,'source_rms',reference,'output_rms',measured)
+                  assert measured>max(0.0001,reference*0.02), f'{name} audio missing or silent in {start}-{start+length}s'
+          print('AUDIO_TIMELINE_QA_PASS',len(segments),'segments')
           if os.environ['INPUT_KIND']=='original':
               print('NATIVE_ORIGINAL_12S_CHAIN_PASS_WITH_VISUAL_AND_AUDIO_QA')
           else:
