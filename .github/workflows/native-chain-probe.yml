@@ -18,14 +18,21 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v ffmpeg || ! command -v ffprobe; then
-            echo "FFmpeg missing; bounded apt install with visible logs"
-            if ! sudo timeout 65s apt-get -o DPkg::Lock::Timeout=10 -o Acquire::Retries=0 -o Acquire::http::Timeout=12 -o Acquire::https::Timeout=12 install -y ffmpeg; then
-              echo "First apt install failed/timed out; refresh indexes once with bounded timeouts"
-              sudo timeout 70s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=12 -o Acquire::https::Timeout=12 update
-              sudo timeout 80s apt-get -o DPkg::Lock::Timeout=10 -o Acquire::Retries=0 -o Acquire::http::Timeout=12 -o Acquire::https::Timeout=12 install -y ffmpeg
+            echo "FFmpeg missing: try cached Ubuntu packages for up to 35s"
+            if ! sudo timeout 35s apt-get -o DPkg::Lock::Timeout=10 -o Acquire::Retries=0 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 install -y ffmpeg; then
+              echo "APT_TIMEOUT_OR_FAILURE: use SHA256-pinned GPL FFmpeg binary instead of hanging on apt mirrors"
+              # Fixed, public, GPL build; GitHub release API published the exact SHA256.
+              ffmpeg_tag=autobuild-2026-10-26-14-25
+              ffmpeg_archive=ffmpeg-N-128100-gceb466cbcd-linux64-gpl.tar.xz
+              curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 "https://github.com/BtbN/FFmpeg-Builds/releases/download/${ffmpeg_tag}/${ffmpeg_archive}" -o "${ffmpeg_archive}"
+              echo "cd6219478e044024cea76bbd3e053bd85b57485381d5c61e72415c8e8b8db9cd  ${ffmpeg_archive}" | sha256sum -c -
+              tar -xJf "${ffmpeg_archive}"
+              export PATH="$PWD/ffmpeg-N-128100-gceb466cbcd-linux64-gpl/bin:$PATH"
+              echo "$PWD/ffmpeg-N-128100-gceb466cbcd-linux64-gpl/bin" >> "$GITHUB_PATH"
             fi
           fi
           command -v ffmpeg && command -v ffprobe
+          ffmpeg -version | head -1
           mkdir -p native bin
           for spec in 'filmcraft 0.13.0 40e9d685fb3ed1b0a21c9c02211f1a8499e09a47c551244ce7ee80f2584d3a9b' 'effectcraft 0.17.0 cd7ace0d74734b79e851f18537c14b2953b7feb5da240f5005e6805476a15292'; do
             read -r app version checksum <<< "$spec"
