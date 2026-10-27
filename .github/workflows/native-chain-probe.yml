@@ -171,6 +171,26 @@ jobs:
           print('source_vs_filmcraft_frame_mad',diff)
           assert film_mean>max(8,src_mean*0.15), 'FilmCraft footage nearly black: inspect media status, import and timeline'
           assert diff<65, 'FilmCraft source picture not preserved; investigate timeline/media decode'
+          # A single frame at 0.5s cannot detect an offline clip, frozen tail or
+          # missing effects later in the 12-second original. Check across timeline.
+          def frame_at(path,seconds):
+              return subprocess.check_output(['ffmpeg','-nostdin','-v','error','-ss',str(seconds),'-i',path,'-frames:v','1','-vf','scale=160:90','-pix_fmt','rgb24','-f','rawvideo','pipe:1'])
+          checkpoints=[0.25,0.75,1.25,1.75] if expected<3 else [0.5,3.0,6.0,9.0,11.5]
+          for t in checkpoints:
+              original=frame_at('native/input.mp4',t)
+              imported=frame_at('native/filmcraft.mp4',t)
+              unmodified=frame_at('native/effectcraft-unmodified.mp4',t)
+              effected=frame_at('native/effectcraft.mp4',t)
+              assert len(original)==len(imported)==len(unmodified)==len(effected)==160*90*3, f'Missing video frame at {t}s'
+              original_mean=sum(original)/len(original)
+              imported_mean=sum(imported)/len(imported)
+              source_mad=sum(abs(a-b) for a,b in zip(original,imported))/len(original)
+              effect_mad=sum(abs(a-b) for a,b in zip(unmodified,effected))/len(original)
+              print('timeline_frame_qa',{'second':t,'source_mean':round(original_mean,3),'filmcraft_mean':round(imported_mean,3),'source_mad':round(source_mad,3),'effect_mad':round(effect_mad,3)})
+              assert imported_mean>max(8,original_mean*0.15), f'Blank or offline FilmCraft footage at {t}s'
+              assert source_mad<65, f'FilmCraft picture differs excessively at {t}s'
+              assert effect_mad>0.4, f'EffectCraft effect missing at {t}s'
+          print('MULTI_FRAME_TIMELINE_QA_PASS',len(checkpoints),'checkpoints')
           # Detect silent audio tracks (a codec stream alone is not evidence of sound).
           import struct,math
           def rms(path):
