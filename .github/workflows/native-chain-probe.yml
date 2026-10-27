@@ -48,7 +48,7 @@ jobs:
             echo "INPUT_KIND=original" >> "$GITHUB_ENV"
             echo "ORIGINAL_INPUT_VERIFIED: 12s source SHA256"
           else
-            ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=16:duration=2" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest native/input.mp4
+            ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=2" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest native/input.mp4
             echo "END_SECONDS=2" >> "$GITHUB_ENV"
             echo "INPUT_KIND=synthetic" >> "$GITHUB_ENV"
             echo "NO_ORIGINAL_INPUT: synthetic-only test, full acceptance gate CLOSED"
