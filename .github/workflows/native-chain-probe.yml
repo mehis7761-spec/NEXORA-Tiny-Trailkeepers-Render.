@@ -72,6 +72,7 @@ jobs:
           PY
           item="$(cat native/item-id.txt)"
           "$cli" --project native/filmcraft.fcproj --save exec timeline.place "{\"item\":$item,\"time\":0,\"track\":\"V1\",\"audioTrack\":\"A1\"}" | tee native/filmcraft-place.json
+          "$cli" --project native/filmcraft.fcproj exec media.status '{}' > native/filmcraft-media-status.json 2>&1 || echo "MEDIA_STATUS_DIAGNOSTIC_FAILED (inspect artifact)"
           "$cli" --project native/filmcraft.fcproj inspect sequence > native/filmcraft-sequence.json
           python3 - <<'PY'
           import json
@@ -117,6 +118,7 @@ jobs:
               assert abs(float(d['format']['duration'])-expected)<0.25, 'Wrong duration'
               assert any(s.get('codec_type')=='video' for s in d['streams']), 'Missing video'
               assert any(s.get('codec_type')=='audio' for s in d['streams']), 'Missing audio'
+              assert any(s.get('codec_type')=='video' and s.get('width')==1920 and s.get('height')==1080 for s in d['streams']), 'Output is not 1920x1080'
           def frame(path):
               return subprocess.check_output(['ffmpeg','-nostdin','-v','error','-ss','0.5','-i',path,'-frames:v','1','-vf','scale=160:90','-pix_fmt','rgb24','-f','rawvideo','pipe:1'])
           plain=frame('native/effectcraft-unmodified.mp4')
@@ -128,15 +130,37 @@ jobs:
           mad=sum(abs(a-b) for a,b in zip(plain,changed))/len(plain)
           print('native_effect_mean_absolute_pixel_difference',mad)
           assert mad>0.4, 'Effect did not produce a measurable visual difference'
+          # A green decode with video/audio streams is insufficient: prior FilmCraft
+          # output was almost black (mean RGB 3.48 vs source 123.57).
+          # Reject blank/offline footage even for the synthetic test.
+          src=frame('native/input.mp4')
+          filmed=frame('native/filmcraft.mp4')
+          src_mean=sum(src)/len(src)
+          film_mean=sum(filmed)/len(filmed)
+          diff=sum(abs(a-b) for a,b in zip(src,filmed))/len(src)
+          print('source_vs_filmcraft_rgb_mean',src_mean,film_mean)
+          print('source_vs_filmcraft_frame_mad',diff)
+          assert film_mean>max(8,src_mean*0.15), 'FilmCraft footage nearly black: inspect media status, import and timeline'
+          assert diff<65, 'FilmCraft source picture not preserved; investigate timeline/media decode'
+          # Detect silent audio tracks (a codec stream alone is not evidence of sound).
+          import struct,math
+          def rms(path):
+              raw=subprocess.check_output(['ffmpeg','-nostdin','-v','error','-i',path,'-vn','-ac','1','-ar','8000','-f','f32le','pipe:1'])
+              n=len(raw)//4
+              assert n>1000, 'Audio stream has no decoded samples'
+              vals=struct.iter_unpack('<f',raw[:n*4])
+              return math.sqrt(sum(v[0]*v[0] for v in vals)/n)
+          source_rms=rms('native/input.mp4')
+          print('source_audio_rms',source_rms)
+          assert source_rms>0.0001, 'Test source has silent audio'
+          for p in ('native/filmcraft.mp4','native/effectcraft.mp4'):
+              out_rms=rms(p)
+              print('output_audio_rms',p,out_rms)
+              assert out_rms>max(0.0001,source_rms*0.02), 'Exported audio is silent'
           if os.environ['INPUT_KIND']=='original':
-              src=frame('native/input.mp4')
-              filmed=frame('native/filmcraft.mp4')
-              diff=sum(abs(a-b) for a,b in zip(src,filmed))/len(src)
-              print('original_vs_filmcraft_frame_difference',diff)
-              assert diff<65, 'FilmCraft source visual mismatch'
-              print('NATIVE_ORIGINAL_12S_CHAIN_PASS_WITH_VISUAL_DIFF')
+              print('NATIVE_ORIGINAL_12S_CHAIN_PASS_WITH_VISUAL_AND_AUDIO_QA')
           else:
-              print('NATIVE_SYNTHETIC_CHAIN_PASS_WITH_VISUAL_DIFF (NOT original 12s)')
+              print('NATIVE_SYNTHETIC_CHAIN_PASS_WITH_VISUAL_AND_AUDIO_QA (NOT original 12s)')
           PY
           sha256sum native/input.mp4 native/filmcraft.mp4 native/effectcraft.mp4
       - name: Retain diagnostic logs (no paid services)
