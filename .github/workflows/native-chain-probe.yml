@@ -62,7 +62,10 @@ jobs:
           cli="$(find bin -type f -name filmcraft-cli -print -quit)"
           "$cli" describe timeline.place > native/filmcraft-place-description.json
           cat native/filmcraft-place-description.json
-          "$cli" --demo --save-as native/filmcraft.fcproj import "$(realpath native/input.mp4)" | tee native/filmcraft-import.json
+          # The --demo project contains overlapping demo clips on other tracks.
+          # They rendered almost black instead of our imported source (2026-10-26 log).
+          # A clean headless project is required for a truthful import/export test.
+          "$cli" --save-as native/filmcraft.fcproj import "$(realpath native/input.mp4)" | tee native/filmcraft-import.json
           python3 - <<'PY' > native/item-id.txt
           import json
           x=json.load(open('native/filmcraft-import.json'))
