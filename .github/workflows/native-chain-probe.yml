@@ -48,13 +48,26 @@ jobs:
             echo "INPUT_KIND=original" >> "$GITHUB_ENV"
             echo "ORIGINAL_INPUT_VERIFIED: 12s source SHA256"
           else
-            ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=2" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest native/input.mp4
+            ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=1920x1080:rate=16:duration=2" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest native/input.mp4
             echo "END_SECONDS=2" >> "$GITHUB_ENV"
             echo "INPUT_KIND=synthetic" >> "$GITHUB_ENV"
             echo "NO_ORIGINAL_INPUT: synthetic-only test, full acceptance gate CLOSED"
           fi
           ffmpeg -v error -i native/input.mp4 -f null -
           ffprobe -v error -show_entries format=duration -show_entries stream=codec_type,width,height -of json native/input.mp4
+          # Preserve the 16fps cadence of the original 192-frame, 12-second source.
+          python3 - <<'PY'
+          import json,subprocess,os
+          d=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-show_format','-of','json','native/input.mp4']))
+          video=next(s for s in d['streams'] if s['codec_type']=='video')
+          assert video['width']==1920 and video['height']==1080, 'Source must be 1920x1080'
+          assert video['avg_frame_rate']=='16/1', 'Source must be 16fps; inspect input'
+          assert any(s['codec_type']=='audio' for s in d['streams']), 'Source audio missing'
+          assert abs(float(d['format']['duration'])-float(os.environ['END_SECONDS']))<0.1, 'Source duration mismatch'
+          if os.environ['INPUT_KIND']=='original':
+              assert video.get('nb_frames')=='192', 'Original must contain 192 video frames'
+          print('SOURCE_PROBE_PASS',video['avg_frame_rate'],d['format']['duration'])
+          PY
       - name: FilmCraft import, timeline placement and export
         shell: bash
         run: |
@@ -76,7 +89,7 @@ jobs:
           item="$(cat native/item-id.txt)"
           # file.newSequence(fromItem) creates a clean sequence AND places the clip
           # on V1/A1, per upstream engine commands.rs. No second placement needed.
-          "$cli" --project native/filmcraft.fcproj --save exec file.newSequence "{\"fromItem\":$item,\"name\":\"Tiny Trailkeepers Native Test\",\"width\":1920,\"height\":1080,\"fps\":24}" | tee native/filmcraft-place.json
+          "$cli" --project native/filmcraft.fcproj --save exec file.newSequence "{\"fromItem\":$item,\"name\":\"Tiny Trailkeepers Native Test\",\"width\":1920,\"height\":1080,\"fps\":16}" | tee native/filmcraft-place.json
           "$cli" --project native/filmcraft.fcproj exec media.status '{}' > native/filmcraft-media-status.json 2>&1 || echo "MEDIA_STATUS_DIAGNOSTIC_FAILED (inspect artifact)"
           "$cli" --project native/filmcraft.fcproj inspect sequence > native/filmcraft-sequence.json
           python3 - <<'PY'
